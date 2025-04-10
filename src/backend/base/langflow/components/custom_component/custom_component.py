@@ -1,7 +1,7 @@
 # from langflow.field_typing import Data
-from langflow.custom import Component
-from langflow.io import MessageTextInput, Output
-from langflow.schema import Data
+from RobilityFlow.custom import Component  # type: ignore
+from RobilityFlow.io import MessageTextInput, Output # type: ignore
+from RobilityFlow.schema import Data # type: ignore
 
 
 class CustomComponent(Component):

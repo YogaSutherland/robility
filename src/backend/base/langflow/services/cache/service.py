@@ -5,17 +5,10 @@ import time
 from collections import OrderedDict
 from typing import Generic, Union
 
-import dill
 from loguru import logger
 from typing_extensions import override
 
-from langflow.services.cache.base import (
-    AsyncBaseCacheService,
-    AsyncLockType,
-    CacheService,
-    ExternalAsyncBaseCacheService,
-    LockType,
-)
+from langflow.services.cache.base import AsyncBaseCacheService, AsyncLockType, CacheService, LockType
 from langflow.services.cache.utils import CACHE_MISS
 
 
@@ -175,7 +168,7 @@ class ThreadingInMemoryCache(CacheService, Generic[LockType]):
         return f"InMemoryCache(max_size={self.max_size}, expiration_time={self.expiration_time})"
 
 
-class RedisCache(ExternalAsyncBaseCacheService, Generic[LockType]):
+class RedisCache(AsyncBaseCacheService, Generic[LockType]):
     """A Redis-based cache implementation.
 
     This cache supports setting an expiration time for cached items.
@@ -225,15 +218,15 @@ class RedisCache(ExternalAsyncBaseCacheService, Generic[LockType]):
             self._client = StrictRedis(host=host, port=port, db=db)
         self.expiration_time = expiration_time
 
-    async def is_connected(self) -> bool:
+    # check connection
+    def is_connected(self) -> bool:
         """Check if the Redis client is connected."""
         import redis
 
         try:
-            await self._client.ping()
+            asyncio.run(self._client.ping())
         except redis.exceptions.ConnectionError:
-            msg = "RedisCache could not connect to the Redis server"
-            logger.exception(msg)
+            logger.exception("RedisCache could not connect to the Redis server")
             return False
         return True
 
@@ -242,17 +235,17 @@ class RedisCache(ExternalAsyncBaseCacheService, Generic[LockType]):
         if key is None:
             return CACHE_MISS
         value = await self._client.get(str(key))
-        return dill.loads(value) if value else CACHE_MISS
+        return pickle.loads(value) if value else CACHE_MISS
 
     @override
     async def set(self, key, value, lock=None) -> None:
         try:
-            if pickled := dill.dumps(value, recurse=True):
+            if pickled := pickle.dumps(value):
                 result = await self._client.setex(str(key), self.expiration_time, pickled)
                 if not result:
                     msg = "RedisCache could not set the value."
                     raise ValueError(msg)
-        except pickle.PicklingError as exc:
+        except TypeError as exc:
             msg = "RedisCache only accepts values that can be pickled. "
             raise TypeError(msg) from exc
 

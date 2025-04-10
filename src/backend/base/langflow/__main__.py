@@ -9,6 +9,9 @@ import time
 import warnings
 from contextlib import suppress
 from pathlib import Path
+import sys
+sys.modules["RobilityFlow"] = sys.modules["langflow"]
+
 
 import click
 import httpx
@@ -154,11 +157,6 @@ def run(
     max_file_size_upload: int | None = typer.Option(  # noqa: ARG001
         None,
         help="Defines the maximum file size for the upload in MB.",
-        show_default=False,
-    ),
-    webhook_polling_interval: int | None = typer.Option(  # noqa: ARG001
-        None,
-        help="Defines the polling interval for the webhook.",
         show_default=False,
     ),
 ) -> None:
@@ -591,8 +589,7 @@ def api_key(
 
     unmasked_api_key = asyncio.run(aapi_key())
     # Create a banner to display the API key and tell the user it won't be shown again
-    if unmasked_api_key:
-        api_key_banner(unmasked_api_key)
+    api_key_banner(unmasked_api_key)
 
 
 def show_version(*, value: bool):

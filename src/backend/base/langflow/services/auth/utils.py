@@ -19,6 +19,11 @@ from langflow.services.database.models.user.crud import get_user_by_id, get_user
 from langflow.services.database.models.user.model import User, UserRead
 from langflow.services.deps import get_db_service, get_session, get_settings_service
 from langflow.services.settings.service import SettingsService
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse , JSONResponse
+
+
+
 
 if TYPE_CHECKING:
     from langflow.services.database.models.api_key.model import ApiKey
@@ -327,6 +332,24 @@ async def create_refresh_token(refresh_token: str, db: AsyncSession):
             detail="Invalid refresh token",
         ) from e
 
+async def authenticate_user_sso(username: str , db :AsyncSession) -> User | None:
+     user = await get_user_by_username(db, username)
+     
+     if not user:
+        return None
+     
+     if not user.is_active:
+        if not user.last_login_at:
+
+            
+            
+            return "Waiting for approval"
+            # raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Waiting for approval")
+        return "Inactive user"
+
+        # raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
+
+     return user 
 
 async def authenticate_user(username: str, password: str, db: AsyncSession) -> User | None:
     user = await get_user_by_username(db, username)
@@ -375,29 +398,13 @@ def encrypt_api_key(api_key: str, settings_service: SettingsService):
 
 
 def decrypt_api_key(encrypted_api_key: str, settings_service: SettingsService):
-    """Decrypt the provided encrypted API key using Fernet decryption.
-
-    This function first attempts to decrypt the API key by encoding it,
-    assuming it is a properly encoded string. If that fails, it logs a detailed
-    debug message including the exception information and retries decryption
-    using the original string input.
-
-    Args:
-        encrypted_api_key (str): The encrypted API key.
-        settings_service (SettingsService): Service providing authentication settings.
-
-    Returns:
-        str: The decrypted API key, or an empty string if decryption cannot be performed.
-    """
     fernet = get_fernet(settings_service)
+    decrypted_key = ""
+    # Two-way decryption
     if isinstance(encrypted_api_key, str):
         try:
-            return fernet.decrypt(encrypted_api_key.encode()).decode()
-        except Exception as primary_exception:  # noqa: BLE001
-            logger.debug(
-                "Decryption using UTF-8 encoded API key failed. Error: %s. "
-                "Retrying decryption using the raw string input.",
-                primary_exception,
-            )
-            return fernet.decrypt(encrypted_api_key).decode()
-    return ""
+            decrypted_key = fernet.decrypt(encrypted_api_key.encode()).decode()
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to decrypt API key")
+            decrypted_key = fernet.decrypt(encrypted_api_key).decode()
+    return decrypted_key

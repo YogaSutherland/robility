@@ -5,6 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from langflow.api.utils import CurrentActiveUser, DbSession
 from langflow.api.v1.schemas import ApiKeyCreateRequest, ApiKeysResponse
 from langflow.services.auth import utils as auth_utils
+from fastapi.responses import FileResponse
+import os
+
 
 # Assuming you have these methods in your service layer
 from langflow.services.database.models.api_key.crud import create_api_key, delete_api_key, get_api_keys
@@ -52,6 +55,16 @@ async def delete_api_key_route(
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"detail": "API Key deleted"}
 
+@router.get("/cdn")
+async def cdn():
+    # Absolute path to the JS file inside the virtual environment
+    file_path = "/app/.venv/lib/python3.12/site-packages/langflow/api/v1/mins.js"
+    
+    # Check if the file exists
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type="application/javascript")
+    else:
+        return {"message": "File does not exist."}
 
 @router.post("/store")
 async def save_store_api_key(

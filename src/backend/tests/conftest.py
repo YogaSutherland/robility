@@ -29,7 +29,7 @@ from langflow.services.database.models.transactions.model import TransactionTabl
 from langflow.services.database.models.user.model import User, UserCreate, UserRead
 from langflow.services.database.models.vertex_builds.crud import delete_vertex_builds_by_flow_id
 from langflow.services.database.utils import session_getter
-from langflow.services.deps import get_db_service, session_scope
+from langflow.services.deps import get_db_service
 from loguru import logger
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import selectinload
@@ -73,7 +73,6 @@ def blockbuster(request):
                 .can_block_in("httpx/_client.py", "_init_transport")
                 .can_block_in("rich/traceback.py", "_render_stack")
                 .can_block_in("langchain_core/_api/internal.py", "is_caller_internal")
-                .can_block_in("langchain_core/runnables/utils.py", "get_function_nonlocals")
             )
 
             for func in ["os.stat", "os.path.abspath", "os.scandir"]:
@@ -136,12 +135,11 @@ def get_text():
 
 
 async def delete_transactions_by_flow_id(db: AsyncSession, flow_id: UUID):
-    if not flow_id:
-        return
     stmt = select(TransactionTable).where(TransactionTable.flow_id == flow_id)
     transactions = await db.exec(stmt)
     for transaction in transactions:
         await db.delete(transaction)
+    await db.commit()
 
 
 async def _delete_transactions_and_vertex_builds(session, flows: list[Flow]):
@@ -149,14 +147,8 @@ async def _delete_transactions_and_vertex_builds(session, flows: list[Flow]):
     for flow_id in flow_ids:
         if not flow_id:
             continue
-        try:
-            await delete_vertex_builds_by_flow_id(session, flow_id)
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"Error deleting vertex builds for flow {flow_id}: {e}")
-        try:
-            await delete_transactions_by_flow_id(session, flow_id)
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"Error deleting transactions for flow {flow_id}: {e}")
+        await delete_vertex_builds_by_flow_id(session, flow_id)
+        await delete_transactions_by_flow_id(session, flow_id)
 
 
 @pytest.fixture
@@ -402,9 +394,8 @@ async def client_fixture(
 
 
 @pytest.fixture
-def runner(tmp_path):
-    env = {"LANGFLOW_DATABASE_URL": f"sqlite:///{tmp_path}/test.db"}
-    return CliRunner(env=env)
+def runner():
+    return CliRunner()
 
 
 @pytest.fixture
@@ -442,21 +433,12 @@ async def active_user(client):  # noqa: ARG001
     yield user
     # Clean up
     # Now cleanup transactions, vertex_build
-    try:
-        async with db_manager.with_session() as session:
-            user = await session.get(User, user.id, options=[selectinload(User.flows)])
-            await _delete_transactions_and_vertex_builds(session, user.flows)
-            await session.commit()
-    except Exception as e:  # noqa: BLE001
-        logger.exception(f"Error deleting transactions and vertex builds for user: {e}")
+    async with db_manager.with_session() as session:
+        user = await session.get(User, user.id, options=[selectinload(User.flows)])
+        await _delete_transactions_and_vertex_builds(session, user.flows)
+        await session.delete(user)
 
-    try:
-        async with db_manager.with_session() as session:
-            user = await session.get(User, user.id)
-            await session.delete(user)
-            await session.commit()
-    except Exception as e:  # noqa: BLE001
-        logger.exception(f"Error deleting user: {e}")
+        await session.commit()
 
 
 @pytest.fixture
@@ -655,13 +637,13 @@ async def get_simple_api_test(client, logged_in_headers, json_simple_api_test):
 
 
 @pytest.fixture(name="starter_project")
-async def get_starter_project(client, active_user):  # noqa: ARG001
+async def get_starter_project(active_user):
     # once the client is created, we can get the starter project
-    async with session_scope() as session:
+    async with session_getter(get_db_service()) as session:
         stmt = (
             select(Flow)
             .where(Flow.folder.has(Folder.name == STARTER_FOLDER_NAME))
-            .where(Flow.name == "Basic Prompting")
+            .where(Flow.name == "Basic Prompting (Hello, World)")
         )
         flow = (await session.exec(stmt)).first()
         if not flow:
@@ -669,17 +651,7 @@ async def get_starter_project(client, active_user):  # noqa: ARG001
             raise ValueError(msg)
 
         # ensure openai api key is set
-        openai_api_key = get_openai_api_key()
-        data_as_json = json.dumps(flow.data)
-        data_as_json = data_as_json.replace("OPENAI_API_KEY", openai_api_key)
-        # also replace `"load_from_db": true` with `"load_from_db": false`
-        if '"load_from_db": true' in data_as_json:
-            data_as_json = data_as_json.replace('"load_from_db": true', '"load_from_db": false')
-        if '"load_from_db": true' in data_as_json:
-            msg = "load_from_db should be false"
-            raise ValueError(msg)
-        flow.data = json.loads(data_as_json)
-
+        get_openai_api_key()
         new_flow_create = FlowCreate(
             name=flow.name,
             description=flow.description,

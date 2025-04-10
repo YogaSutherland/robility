@@ -135,12 +135,10 @@ async def log_transaction(
             flow_id=flow_id if isinstance(flow_id, UUID) else UUID(flow_id),
         )
         async with session_getter(get_db_service()) as session:
-            with session.no_autoflush:
-                inserted = await crud_log_transaction(session, transaction)
-                if inserted:
-                    logger.debug(f"Logged transaction: {inserted.id}")
+            inserted = await crud_log_transaction(session, transaction)
+            logger.debug(f"Logged transaction: {inserted.id}")
     except Exception:  # noqa: BLE001
-        logger.error("Error logging transaction")
+        logger.exception("Error logging transaction")
 
 
 async def log_vertex_build(
